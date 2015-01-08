@@ -122,12 +122,12 @@ ifeq ($(MR_DPI_MUL),)
 endif
 else ifeq ($(MR_DPI),xhdpi)
 ifeq ($(MR_DPI_MUL),)
-    MR_DPI_MUL := 1.5
+    MR_DPI_MUL := 3
 endif
 endif
 
 ifeq ($(MR_DPI_FONT),)
-    MR_DPI_FONT := 96
+    MR_DPI_FONT := 200
 endif
 
 LOCAL_CFLAGS += -DMR_DPI_FONT=$(MR_DPI_FONT)

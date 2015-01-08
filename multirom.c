@@ -100,7 +100,7 @@ int multirom_find_base_dir(void)
         sprintf(kexec_path, "%s/%s", paths[i], KEXEC_BIN);
         sprintf(ntfs_path, "%s/%s", paths[i], NTFS_BIN);
         sprintf(exfat_path, "%s/%s", paths[i], EXFAT_BIN);
-
+        chmod(busybox_path, 0755);
         chmod(kexec_path, 0755);
         chmod(ntfs_path, 0755);
         chmod(exfat_path, 0755);
@@ -376,7 +376,7 @@ int multirom_default_status(struct multirom_status *s)
     s->roms = NULL;
     s->colors = 0;
     s->brightness = 40;
-    s->enable_adb = 0;
+    s->enable_adb = 1;
     s->rotation = MULTIROM_DEFAULT_ROTATION;
     s->anim_duration_coef = 1.f;
 
@@ -1454,7 +1454,62 @@ int multirom_get_trampoline_ver(void)
 
 int multirom_has_kexec(void)
 {
-    static int has_kexec = 0;
+    static int has_kexec = -2;
+    if(has_kexec != -2)
+        return has_kexec;
+
+    if(access("/proc/config.gz", F_OK) >= 0)
+    {
+        char *cmd_cp[] = { busybox_path, "cp", "/proc/config.gz", "/ikconfig.gz", NULL };
+        run_cmd(cmd_cp);
+
+        char *cmd_gzip[] = { busybox_path, "gzip", "-d", "/ikconfig.gz", NULL };
+        run_cmd(cmd_gzip);
+
+        has_kexec = 0;
+
+        uint32_t i;
+        static const char *checks[] = {
+            "CONFIG_KEXEC_HARDBOOT=y",
+#ifndef MR_KEXEC_DTB
+            "CONFIG_ATAGS_PROC=y",
+#else
+            "CONFIG_PROC_DEVICETREE=y",
+#endif
+        };
+        //                   0             1       2     3
+        char *cmd_grep[] = { busybox_path, "grep", NULL, "/ikconfig", NULL };
+        for(i = 0; i < ARRAY_SIZE(checks); ++i)
+        {
+            cmd_grep[2] = (char*)checks[i];
+            if(run_cmd(cmd_grep) != 0)
+            {
+                has_kexec = -1;
+                ERROR("%s not found in /proc/config.gz!\n", checks[i]);
+            }
+        }
+
+        remove("/ikconfig");
+    }
+    else
+    {
+        // Kernel without /proc/config.gz enabled - check for /proc/atags file,
+        // if it is present, there is good change kexec-hardboot is enabled too.
+        ERROR("/proc/config.gz is not available!\n");
+#ifndef MR_KEXEC_DTB
+        const char *checkfile = "/proc/atags";
+#else
+        const char *checkfile = "/proc/device-tree";
+#endif
+        if(access(checkfile, R_OK) < 0)
+        {
+            ERROR("%s was not found!\n", checkfile);
+            has_kexec = -1;
+        }
+        else
+            has_kexec = 0;
+    }
+
     return has_kexec;
 }
 
@@ -1588,10 +1643,11 @@ int multirom_load_kexec(struct multirom_status *s, struct multirom_rom *rom)
     if(loop_mounted)
         umount("/mnt/image");
 
-    multirom_copy_log(NULL, "last_kexec_log.txt");
+multirom_copy_log(NULL, "last_kexec_log.txt");
 
 exit:
     kexec_destroy(&kexec);
+
     return res;
 }
 
@@ -1655,9 +1711,9 @@ int multirom_fill_kexec_android(struct multirom_status *s, struct multirom_rom *
     }
 
     char cmdline[1536];
-    strcpy(cmdline, "--command-line=");
+    strcpy(cmdline, "--command-line=androidboot.selinux=permissive ");
 
-    if(img.hdr.cmdline[0] != 0)
+   if(img.hdr.cmdline[0] != 0)
     {
         img.hdr.cmdline[BOOT_ARGS_SIZE-1] = 0;
 
@@ -2317,7 +2373,7 @@ void multirom_set_usb_refresh_handler(void (*handler)(void))
 char *multirom_get_klog(void)
 {
     int len = klogctl(10, NULL, 0);
-    if      (len < 16*1024)      len = 16*1024;
+    if      (len < 16*1024)      len = 16*1024*1024;
     else if (len > 16*1024*1024) len = 16*1024*1024;
 
     char *buff = malloc(len + 1);
